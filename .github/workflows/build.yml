@@ -1,0 +1,77 @@
+name: Build NotchTodo App
+
+on:
+  workflow_dispatch: # Manual trigger: run only on-demand to save quota
+  push:
+    tags:
+      - 'v*'          # Optional: automatically run when pushing a tag like v1.0.0
+
+# Prevent multiple builds from running concurrently
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build macOS App
+    runs-on: macos-14  # Apple Silicon M1 runner
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode Version
+        run: |
+          if [ -d "/Applications/Xcode_16.0.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.0.app
+          elif [ -d "/Applications/Xcode_15.4.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_15.4.app
+          else
+            sudo xcode-select -s /Applications/Xcode.app
+          fi
+          xcodebuild -version
+
+      - name: Cache Swift PM Build Artifacts
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Compile Release Binary
+        run: |
+          swift build -c release
+
+      - name: Bundle into macOS .app
+        run: |
+          APP_NAME="NotchTodo"
+          APP_DIR="${APP_NAME}.app"
+          
+          echo "Packaging ${APP_DIR}..."
+          mkdir -p "${APP_DIR}/Contents/MacOS"
+          mkdir -p "${APP_DIR}/Contents/Resources"
+          
+          # Copy compiled binary into bundle
+          cp .build/release/${APP_NAME} "${APP_DIR}/Contents/MacOS/${APP_NAME}"
+          chmod +x "${APP_DIR}/Contents/MacOS/${APP_NAME}"
+          
+          # Copy Info.plist into bundle
+          cp NotchTodo/App/Info.plist "${APP_DIR}/Contents/Info.plist"
+          
+          # Ad-hoc sign the bundle
+          codesign --force --deep --sign - "${APP_DIR}"
+          
+          # Create distributable zip
+          zip -r "${APP_NAME}.zip" "${APP_DIR}"
+          echo "Created ${APP_NAME}.zip successfully."
+
+      - name: Upload Built App
+        uses: actions/upload-artifact@v4
+        with:
+          name: NotchTodo-macOS
+          path: NotchTodo.zip
+          retention-days: 14
