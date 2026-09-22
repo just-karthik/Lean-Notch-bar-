@@ -16,14 +16,25 @@ final class NotchWindowManager: ObservableObject {
         }
     }
     
+    @Published var notchHeight: CGFloat = 32
+    @Published var notchWidth: CGFloat = 180
+    
     let store = TodoStore()
     private var panel: NotchPanel?
     private var globalClickMonitor: Any?
     private var localKeyMonitor: Any?
     
     init() {
+        refreshDimensions()
         setupPanel()
         setupNotifications()
+    }
+    
+    private func refreshDimensions() {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let dims = NotchDimensions.current(for: screen)
+        self.notchHeight = dims.notchHeight
+        self.notchWidth = dims.notchWidth
     }
     
     private func setupPanel() {
@@ -44,6 +55,7 @@ final class NotchWindowManager: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            self?.refreshDimensions()
             self?.updateWindowFrame(animated: false)
         }
     }
@@ -72,18 +84,20 @@ final class NotchWindowManager: ObservableObject {
         guard let panel = panel, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         
         let screenFrame = screen.frame
-        let notchHeight = screen.safeAreaInsets.top > 0 ? screen.safeAreaInsets.top : 32
         
-        let width: CGFloat = isExpanded ? 380 : 200
-        let height: CGFloat = isExpanded ? 360 : (notchHeight > 0 ? notchHeight + 4 : 36)
-        let x = screenFrame.minX + (screenFrame.width - width) / 2
-        let y = screenFrame.maxY - height
+        // Exact notch sizes
+        let targetWidth: CGFloat = isExpanded ? 500 : max(notchWidth + 20, 200)
+        let targetHeight: CGFloat = isExpanded ? 350 : (notchHeight + 10)
         
-        let targetFrame = NSRect(x: x, y: y, width: width, height: height)
+        // Anchored flush to top center of screen
+        let x = screenFrame.minX + (screenFrame.width - targetWidth) / 2
+        let y = screenFrame.maxY - targetHeight
+        
+        let targetFrame = NSRect(x: x, y: y, width: targetWidth, height: targetHeight)
         
         if animated {
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.22
+                context.duration = 0.28
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 panel.animator().setFrame(targetFrame, display: true)
             }
@@ -95,14 +109,14 @@ final class NotchWindowManager: ObservableObject {
     private func startOutsideClickMonitor() {
         stopOutsideClickMonitor()
         
-        // Monitor global clicks outside our app
+        // Monitor mouse clicks outside this panel
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor in
                 self?.collapse()
             }
         }
         
-        // Monitor Escape key press locally
+        // Monitor Escape key
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 { // ESC key
                 Task { @MainActor in
@@ -126,7 +140,7 @@ final class NotchWindowManager: ObservableObject {
     }
 }
 
-// Container view switching between collapsed and expanded modes
+// Container view handling animated transitions between collapsed and expanded states
 struct RootNotchContainerView: View {
     @ObservedObject var manager: NotchWindowManager
     @ObservedObject var store: TodoStore
@@ -136,8 +150,9 @@ struct RootNotchContainerView: View {
             if manager.isExpanded {
                 ExpandedNotchView(
                     store: store,
+                    notchHeight: manager.notchHeight,
                     onCollapse: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
                             manager.collapse()
                         }
                     },
@@ -146,14 +161,15 @@ struct RootNotchContainerView: View {
                     }
                 )
                 .transition(.asymmetric(
-                    insertion: .scale(scale: 0.95, anchor: .top).combined(with: .opacity),
-                    removal: .scale(scale: 0.95, anchor: .top).combined(with: .opacity)
+                    insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .top)),
+                    removal: .opacity.combined(with: .scale(scale: 0.95, anchor: .top))
                 ))
             } else {
                 CollapsedNotchView(
                     store: store,
+                    notchHeight: manager.notchHeight,
                     onExpand: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
                             manager.expand()
                         }
                     }
