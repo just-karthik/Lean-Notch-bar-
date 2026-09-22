@@ -1,5 +1,11 @@
 import SwiftUI
 
+enum TaskFilter: String, CaseIterable {
+    case all = "All"
+    case pending = "Pending"
+    case completed = "Done"
+}
+
 struct ExpandedNotchView: View {
     @ObservedObject var store: TodoStore
     let notchHeight: CGFloat
